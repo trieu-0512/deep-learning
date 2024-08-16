@@ -1,0 +1,27 @@
+INT CRS232::WriteString(CONST CHAR *pcCommand, DWORD length, bool do_clear)
+{
+    DWORD dwBytesWrite = 0;
+    if (do_clear) Clear();
+    
+    if(FALSE == ::WriteFile(m_hCOM, pcCommand, length, &dwBytesWrite, &m_OverlappedWrite))
+    {
+        if(ERROR_IO_PENDING == ::GetLastError())
+        {
+            if(::WaitForSingleObject(m_OverlappedWrite.hEvent, 1000))
+            {
+                ::OutputDebugStringA("TRUE\n");
+                dwBytesWrite = -1;
+                return -1;
+            }
+            else
+            {
+                ::GetOverlappedResult(m_hCOM, &m_OverlappedWrite, &dwBytesWrite, FALSE);
+            }
+        }
+        else
+        {
+            // Handle other errors if necessary
+        }
+    }
+    return ERROR_SUCCESS;
+}
