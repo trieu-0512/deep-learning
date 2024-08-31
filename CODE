@@ -1,0 +1,1132 @@
+#include "stdafx.h"
+#include <string>
+#include <vector>
+#include <map>
+#include "Dut.h"
+#include "PjQSM.h"
+#include <regex>
+#include <windows.system.h>
+#include <fstream>
+
+
+extern CDOS;
+
+CPjQSM::CPjQSM(LPVOID ptr)
+{
+	m_main_dut = ptr;
+
+
+	add_test_item("TEST_BUTTON", &CPjQSM::cmd_test_btn); // min add 240315
+	add_test_item("CMD_CONTROL_LIGHT_PANEL", &CPjQSM::cmd_control_light_panel); // Hai add 240321
+	add_test_item("TEST_SPEAKER_SPL", &CPjQSM::test_speaker_spl); // Hai add 240321
+	add_test_item("TEST_IR_SENSOR", &CPjQSM::cmd_test_IR_Sensor); // Hai add 240321
+	add_test_item("TEST_LIGHT_METER", &CPjQSM::cmd_test_Light_Meter); // Hai add 240327
+	add_test_item("CMD_TEST_DDR", &CPjQSM::cmd_ddr_test); // Hai add 240327
+
+
+	/// <summary>
+	/// The test functions with PPS
+	/// </summary>
+	add_test_item("TEST_SET_VOLT_CURR_OUTPUT", &CPjQSM::test_SET_VOLT_CURR_OUTPUT);
+	add_test_item("TEST_MEAS_PPS_VOLT", &CPjQSM::test_MEAS_PPS_VOLT);
+	add_test_item("TEST_MEAS_PPS_CURR", &CPjQSM::test_MEAS_PPS_CURR);
+	add_test_item("TEST_PPS_OFF", &CPjQSM::test_PPS_OFF);
+	/// <summary>
+	/// The test functions with DMM
+	/// </summary>
+	add_test_item("TEST_GET_VOLT", &CPjQSM::test_GET_VOLT);
+	add_test_item("TEST_GET_CURR", &CPjQSM::test_GET_CURR);
+	add_test_item("TEST_GET_OHM", &CPjQSM::test_GET_OHM);
+	add_test_item("TEST_GET_OHM_4W", &CPjQSM::test_GET_OHM_4W);
+	/// <summary>
+	/// The Min, Max, Average and Stdevp function
+	/// </summary>
+	ReadData(data);
+	add_test_item("TEST_PIR_MIN_VALUE", &CPjQSM::test_PIR_MIN_VALUE);
+	add_test_item("TEST_PIR_MAX_VALUE", &CPjQSM::test_PIR_MAX_VALUE);
+	add_test_item("TEST_PIR_AVERAGE_VALUE", &CPjQSM::test_PIR_AVERAGE_VALUE);
+	add_test_item("TEST_PIR_STDEVP_VALUE", &CPjQSM::test_PIR_STDEVP_VALUE);
+	/// <summary>
+	/// The function tests the Regular Expression
+	/// </summary>
+	add_test_item("TEST_READ_REGEX", &CPjQSM::test_read_data_from_regex);
+}
+
+
+CPjQSM::~CPjQSM()
+{
+}
+
+bool CPjQSM::FindTestItem(const char* item_name)
+{
+	return (m_command.find(item_name) != m_command.end());
+}
+
+int CPjQSM::RunScriptCommand(string& item_name, string& replaced_item_name, Json::Value& item_param)
+{
+	int ret = S_FALSE;
+	
+	ret = (this->*m_command[item_name])(replaced_item_name.c_str(), item_param);
+	
+	return ret;
+}
+
+int CPjQSM::add_test_item(const char* item_name, FN_CMD fn_cmd)
+{
+	m_command[item_name] = fn_cmd;
+	return 0;
+}
+
+int CPjQSM::cmd_control_light_panel(const char* item, const Json::Value& param) // Hai add 240321
+{
+	int ret = S_FALSE;
+	bool is_port_open = false;
+	string item_name;
+	string port_nickname;
+	int retry = MAINDUT->ParamInt(param, "retry", 0);
+	int times = 0;
+	
+	string r_tmnl;
+	unsigned int chanel;
+	unsigned int brightness;
+	unsigned int size_char;
+	int result = -99;
+	char str_result[64] = {0};
+	unsigned int wr_wait;
+	unsigned int r_timeout;
+	string serial_result = "";
+	int test_result = S_FALSE;
+
+	char cmd_send_brightness[7] = { 0x53, 0x4C, 0x00, 0x01, 0x01, 0x02, 0x00 };
+	char cmd_read_brightness[5] = { 0x54, 0x4C, 0x00, 0x07, 0x01 };
+	char brightness_code[3] = { 0x54, 0x4C, 0x01};
+	char brightness_result[7] = { 0 };
+
+	MAINDUT->ParamStr(param, "item_name", item_name, "");
+	MAINDUT->ParamStr(param, "port_nickname", port_nickname, "");
+	bool reg_enable = MAINDUT->ParamBool(param, "reg_enable", false);
+	//MAINDUT->ParamStr(param, "w_cmd", serial_cmd, "");
+	//serial_cmd = serial_cmd + "\r";
+	MAINDUT->ParamStr(param, "r_tmnl", r_tmnl, "");
+	chanel = MAINDUT->ParamInt(param, "chanel", 2);
+	brightness = MAINDUT->ParamInt(param, "brightness", 0);
+	wr_wait = MAINDUT->ParamInt(param, "wr_wait", 10);
+	r_timeout = MAINDUT->ParamInt(param, "r_timeout", 500);
+
+	cmd_send_brightness[5] = chanel;
+	cmd_send_brightness[6] = brightness;
+
+	do
+	{
+		if (MAINDUT->use_comport(port_nickname.c_str()) != NULL)
+		{
+			is_port_open = MAINDUT->use_comport(port_nickname.c_str())->IsOpen();
+			if (!is_port_open)
+				ret = MAINDUT->use_comport(port_nickname.c_str())->Open();
+
+			RDLOG->WriteLogf("Set chanel: %d, brightness = %d\n", chanel, brightness);
+			size_char = sizeof(	);
+			ret = MAINDUT->use_comport(port_nickname.c_str())->WriteString(cmd_send_brightness, size_char);
+			if (ret == RET_SUCCESS)
+			{
+				Sleep(50);
+				size_char = sizeof(cmd_read_brightness);
+				ret = MAINDUT->use_comport(port_nickname.c_str())->WriteString(cmd_read_brightness, size_char);
+			}
+			if (ret == RET_SUCCESS)
+			{
+				memset(str_result, 0x00, sizeof(str_result));
+				sprintf_s(str_result, "%d", brightness);
+			}
+			/*if (ret == RET_SUCCESS)
+			{
+				Sleep(10);
+				size_char = sizeof(brightness_result);
+				string temp = "";
+				ret = MAINDUT->use_comport(port_nickname.c_str())->ReadString_2(temp, size_char);
+				result = brightness_result[chanel + 2];
+				RDLOG->WriteLogf("Result -> Chanel: %d, brightness = %d\n", chanel, result);
+				memset(str_result, 0x00, sizeof(str_result));
+				sprintf_s(str_result, "%.4f", result);
+			}
+
+			if ((brightness_result[0] == brightness_code[0]) && (brightness_result[1] == brightness_code[1]) && (brightness_result[chanel+2] == brightness))
+			{
+				ret = RET_SUCCESS;
+			}*/
+			//if (r_tmnl == "")
+			//	ret = MAINDUT->use_comport(port_nickname.c_str())->WriteString(cmd_hex, size_cmd);
+
+			//else
+			//	//ret = MAINDUT->use_comport(port_nickname.c_str())->WRString(serial_cmd.c_str(), serial_result, r_tmnl.c_str(), wr_wait, r_timeout);
+			//	ret = MAINDUT->use_comport(port_nickname.c_str())->WriteString(cmd_hex, size_cmd);
+			//RDLOG->WriteLogf(" serial_result(%d):%s<:)\n", ret, serial_result.c_str());
+
+			if (!is_port_open)
+				MAINDUT->use_comport(port_nickname.c_str())->Close();
+		}
+
+		/*if (ret == S_OK)
+			if (reg_enable)
+				ret = MAINDUT->regular(serial_result, param, reg_result);
+		RDLOG->WriteLogf(" reg_result:%s<:)\n", reg_result.c_str());*/
+
+		times++;
+		if (ret == RET_SUCCESS)
+			test_result = MAINDUT->log_sfis_and_set_info(item_name.c_str(), str_result, times > retry);
+		else
+			MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL", times > retry);
+
+
+	} while (times <= retry && test_result == S_FALSE);
+
+	return ret;
+}
+int CPjQSM::cmd_test_IR_Sensor(const char* item, const Json::Value& param) // Hai add 240326
+{
+	int ret = S_FALSE;
+	int test_result = S_FALSE;
+	int times = 0;
+	bool is_port_open_dut = false;
+	bool is_port_open_IR = false;
+	string item_name;
+	string port_nickname_dut;
+	string port_nickname_IR;
+	string serial_cmd_1;
+	string serial_cmd_2;
+	string r_tmnl_1;
+	string r_tmnl_2;
+	char cmd_IR[5] = { 0xA1, 0xF1, 0x00, 0x00, 0x00 };
+	unsigned int wr_wait;
+	unsigned int r_timeout;
+	string serial_result = "";
+	const char ctrl_c_cmd[3] = { 0x03, 0x0d, 0x00 }; //{ 0x03, 0x0d, 0x00 }
+
+
+	MAINDUT->ParamStr(param, "item_name", item_name, "");
+	MAINDUT->ParamStr(param, "port_nickname_dut", port_nickname_dut, "");
+	MAINDUT->ParamStr(param, "port_nickname_IR", port_nickname_IR, "");
+	MAINDUT->ParamStr(param, "w_cmd_1", serial_cmd_1, "");
+	MAINDUT->ParamStr(param, "w_cmd_2", serial_cmd_2, "");
+	serial_cmd_1 = serial_cmd_1 + "\r";
+	serial_cmd_2 = serial_cmd_2 + "\r";
+	MAINDUT->ParamStr(param, "r_tmnl_1", r_tmnl_1, "");
+	MAINDUT->ParamStr(param, "r_tmnl_2", r_tmnl_2, "");
+	int retry = MAINDUT->ParamInt(param, "retry", 0);
+	wr_wait = MAINDUT->ParamInt(param, "wr_wait", 10);
+	r_timeout = MAINDUT->ParamInt(param, "r_timeout", 500);
+
+	unsigned int data_IR = MAINDUT->ParamInt(param, "data_IR", 0);
+	cmd_IR[2] = data_IR;
+	cmd_IR[3] = data_IR;
+	cmd_IR[4] = data_IR;
+
+
+	do
+	{
+		if (MAINDUT->use_comport(port_nickname_dut.c_str()) != NULL)
+		{
+			is_port_open_dut = MAINDUT->use_comport(port_nickname_dut.c_str())->IsOpen();
+			if (!is_port_open_dut)
+				ret = MAINDUT->use_comport(port_nickname_dut.c_str())->Open();
+
+			is_port_open_IR = MAINDUT->use_comport(port_nickname_IR.c_str())->IsOpen();
+			if (!is_port_open_IR)
+				ret = MAINDUT->use_comport(port_nickname_IR.c_str())->Open();
+
+			RDLOG->WriteLogf(" serial_cmd_1:%s\n", serial_cmd_1.c_str());
+			Sleep(50);
+			ret = MAINDUT->use_comport(port_nickname_dut.c_str())->WriteString(serial_cmd_1.c_str());
+			if (ret == S_OK)
+			{
+				Sleep(50);
+				RDLOG->WriteLogf(" serial_cmd_2:%s\n", serial_cmd_2.c_str());
+				ret = MAINDUT->use_comport(port_nickname_dut.c_str())->WRString(serial_cmd_2.c_str(), serial_result, r_tmnl_1.c_str(), wr_wait, r_timeout);
+				RDLOG->WriteLogf(" serial_result:%s<:)\n", serial_result.c_str());
+			}
+			if (serial_result.find(r_tmnl_1) != std::string::npos)
+			{
+				Sleep(50);
+				RDLOG->WriteLogf("CMD IR: A1 F1 %x %x %x\n", cmd_IR[2], cmd_IR[3], cmd_IR[4]);
+				unsigned int size_cmd = sizeof(cmd_IR);
+				ret = MAINDUT->use_comport(port_nickname_IR.c_str())->WriteString(cmd_IR, size_cmd);
+				Sleep(50);
+				ret = MAINDUT->use_comport(port_nickname_dut.c_str())->ReadString(serial_result, r_tmnl_2.c_str(), r_timeout);
+				RDLOG->WriteLogf(" serial_result:%s<:)\n", serial_result.c_str());
+			}
+			if (serial_result.find(r_tmnl_2) != std::string::npos)
+			{
+				test_result = S_OK;
+			}
+			Sleep(50);
+			ret = MAINDUT->use_comport(port_nickname_dut.c_str())->WriteString(ctrl_c_cmd);
+
+			if (!is_port_open_dut)
+				MAINDUT->use_comport(port_nickname_dut.c_str())->Close();
+
+			if (!is_port_open_IR)
+				MAINDUT->use_comport(port_nickname_dut.c_str())->Close();
+		}
+
+
+		times++;
+		if (test_result == S_OK)
+			MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Pass, "PASS", times > retry);
+		else
+			MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL", times > retry);
+
+
+	} while (times <= retry && test_result == S_FALSE);
+
+	return ret;
+}
+int CPjQSM::cmd_test_Light_Meter(const char* item, const Json::Value& param) // Hai add 240327
+{
+	int ret = S_FALSE;
+	int test_result = S_FALSE;
+	int times = 0;
+	bool is_port_open = false;
+	string item_name;
+	string port_nickname;
+	char serial_cmd_connect[] = {0x02, 0x30, 0x30, 0x35, 0x34, 0x31, 0x20, 0x20, 0x20, 0x03, 0x31, 0x33, 0x0D, 0x0A};
+	char serial_cmd_run[] = { 0x02, 0x39, 0x39, 0x35, 0x35, 0x30, 0x20, 0x20, 0x30, 0x03, 0x30, 0x33, 0x0D, 0x0A };
+	char serial_cmd_read[] = { 0x02, 0x30, 0x30, 0x31, 0x30, 0x30, 0x32, 0x30, 0x30, 0x03, 0x30, 0x30, 0x0D, 0x0A };
+	string r_tmnl_connect = "0054    02";
+	//string lux_result_format = "00100 40+ 9845            1D";
+	char cmd_IR[5] = { 0xA1, 0xF1, 0x00, 0x00, 0x00 };
+	int retry;
+	unsigned int wr_wait;
+	unsigned int r_timeout;
+	string serial_result = "";
+	unsigned int size_cmd;
+	float f_lux_value;
+	string str_lux_value;
+
+	MAINDUT->ParamStr(param, "item_name", item_name, "");
+	MAINDUT->ParamStr(param, "port_nickname", port_nickname, "");
+	retry = MAINDUT->ParamInt(param, "retry", 0);
+	wr_wait = MAINDUT->ParamInt(param, "wr_wait", 10);
+	r_timeout = MAINDUT->ParamInt(param, "r_timeout", 500);
+
+
+
+	do
+	{
+		if (MAINDUT->use_comport(port_nickname.c_str()) != NULL)
+		{
+			is_port_open = MAINDUT->use_comport(port_nickname.c_str())->IsOpen();
+			if (!is_port_open)
+				ret = MAINDUT->use_comport(port_nickname.c_str())->Open();
+
+			RDLOG->WriteLogf(" CMD CONNECT METER:%x %x %x %x %x %x %x %x %x %x %x %x %x %x\n", serial_cmd_connect[0], serial_cmd_connect[1],
+				serial_cmd_connect[2], serial_cmd_connect[3], serial_cmd_connect[4], serial_cmd_connect[5], serial_cmd_connect[6], serial_cmd_connect[7],
+				serial_cmd_connect[8],serial_cmd_connect[9], serial_cmd_connect[10], serial_cmd_connect[11], serial_cmd_connect[12], serial_cmd_connect[13]);
+			Sleep(50);
+			size_cmd = sizeof(serial_cmd_connect);
+			ret = MAINDUT->use_comport(port_nickname.c_str())->WriteString(serial_cmd_connect, size_cmd);
+			Sleep(50);
+			ret = MAINDUT->use_comport(port_nickname.c_str())->ReadString(serial_result, r_tmnl_connect.c_str(), r_timeout);
+			RDLOG->WriteLogf(" serial_result:%s<:)\n", serial_result.c_str());
+
+			if (serial_result.find(r_tmnl_connect) != std::string::npos)
+			{
+				RDLOG->WriteLogf(" CMD RUN MODE:%x %x %x %x %x %x %x %x %x %x %x %x %x %x\n", serial_cmd_run[0], serial_cmd_run[1],
+					serial_cmd_run[2], serial_cmd_run[3], serial_cmd_run[4], serial_cmd_run[5], serial_cmd_run[6], serial_cmd_run[7],
+					serial_cmd_run[8], serial_cmd_run[9], serial_cmd_run[10], serial_cmd_run[11], serial_cmd_run[12], serial_cmd_run[13]);
+				Sleep(50);
+				size_cmd = sizeof(serial_cmd_run);
+				ret = MAINDUT->use_comport(port_nickname.c_str())->WriteString(serial_cmd_run, size_cmd);
+				RDLOG->WriteLogf(" CMD READ LUX VALUE:%x %x %x %x %x %x %x %x %x %x %x %x %x %x\n", serial_cmd_read[0], serial_cmd_read[1],
+					serial_cmd_read[2], serial_cmd_read[3], serial_cmd_read[4], serial_cmd_read[5], serial_cmd_read[6], serial_cmd_read[7],
+					serial_cmd_read[8], serial_cmd_read[9], serial_cmd_read[10], serial_cmd_read[11], serial_cmd_read[12], serial_cmd_read[13]);
+				Sleep(50);
+				size_cmd = sizeof(serial_cmd_read);
+				ret = MAINDUT->use_comport(port_nickname.c_str())->WriteString(serial_cmd_read, size_cmd);
+				Sleep(50);
+				ret = MAINDUT->use_comport(port_nickname.c_str())->ReadString(serial_result);
+				RDLOG->WriteLogf(" serial_result:%s<:)\n", serial_result.c_str());
+			}
+			/*serial_result = " 00100 40+ 9842            1D";
+			int temp = serial_result.substr(1, 4).compare("0010");
+			int length1 = serial_result.length();*/
+			ret = S_FALSE;
+			if (serial_result.substr(1, 4).compare("0010") == 0)
+			{
+				ret = S_OK;
+				float sign = serial_result[9] == '-' ? -1.0 : 1.0;
+				float value = stof(serial_result.substr(10,4));
+				unsigned exp_value = stoi(serial_result.substr(14, 1));
+				if (exp_value >= 4)
+				{
+					f_lux_value = sign * value * pow(10, exp_value - 4);
+				}A
+				else
+				{
+					f_lux_value = sign * value * pow(0.1, 4 - exp_value);
+				}
+				str_lux_value = to_string(f_lux_value);
+				RDLOG->WriteLogf(" LUX_VALUE = %s<:)\n", str_lux_value.c_str());
+			}
+
+			if (!is_port_open)
+				MAINDUT->use_comport(port_nickname.c_str())->Close();
+		}
+
+
+		times++;
+		if (ret == S_OK)
+			MAINDUT->log_sfis_and_set_info(item_name.c_str(), str_lux_value.c_str(), times > retry);
+		else
+			MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL", times > retry);
+
+
+	} while (times <= retry && test_result == S_FALSE);
+
+	return ret;
+}
+int CPjQSM::test_speaker_spl(const char* item, const Json::Value& param) // Hai add 240321
+{
+	int ret = S_FALSE;
+	int test_result = S_FALSE;
+	int times = 0;
+	bool is_port_open = false;
+	string item_name;
+	string port_nickname;	
+	string serial_cmd_1;
+	string serial_cmd_2;
+	string r_tmnl_1;
+	string r_tmnl_2;
+	unsigned int wr_wait;
+	unsigned int r_timeout;
+	string serial_result = "";
+	string console_cmd;
+	string console_result;
+	string spl_result;
+	string path_python;
+	string path;
+
+	MAINDUT->ParamStr(param, "item_name", item_name, "");
+	MAINDUT->ParamStr(param, "port_nickname", port_nickname, "");
+	MAINDUT->ParamStr(param, "w_cmd_1", serial_cmd_1, "");
+	MAINDUT->ParamStr(param, "w_cmd_2", serial_cmd_2, "");
+	serial_cmd_1 = serial_cmd_1 + "\r";
+	serial_cmd_2 = serial_cmd_2 + "\r";
+	MAINDUT->ParamStr(param, "r_tmnl_1", r_tmnl_1, "");
+	MAINDUT->ParamStr(param, "r_tmnl_2", r_tmnl_2, "");
+	int retry = MAINDUT->ParamInt(param, "retry", 0);
+	wr_wait = MAINDUT->ParamInt(param, "wr_wait", 10);
+	r_timeout = MAINDUT->ParamInt(param, "r_timeout", 500);
+
+	MAINDUT->ParamStr(param, "path_python", path_python, "C:\\Program Files\\Python38\\python.exe");
+	int mic_id = MAINDUT->ParamInt(param, "mic_id", 1);
+	int rate = MAINDUT->ParamInt(param, "rate", 48000);
+
+	GetCurrentPath(path);
+	path += "\\spl-meter-with-RPi-master\\spl_meter_text.py";
+	if (FileExists(path) == false)
+	{
+		::MessageBoxA(NULL, string("No file:"+path).c_str(), "Warning!", MB_OK);
+		MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL", times > retry);
+		return S_FALSE;
+	}
+	console_cmd = path_python + " " + path;
+	RDLOG->WriteLogf(" console_cmd:%s\n", console_cmd.c_str());
+
+	do
+	{
+		spl_result = "-99999";
+		if (MAINDUT->use_comport(port_nickname.c_str()) != NULL)
+		{
+			is_port_open = MAINDUT->use_comport(port_nickname.c_str())->IsOpen();
+			if (!is_port_open)
+				ret = MAINDUT->use_comport(port_nickname.c_str())->Open();
+
+			RDLOG->WriteLogf(" serial_cmd_1:%s\n", serial_cmd_1.c_str());
+			ret = MAINDUT->use_comport(port_nickname.c_str())->WRString(serial_cmd_1.c_str(), serial_result, r_tmnl_1.c_str(), wr_wait, r_timeout);
+			RDLOG->WriteLogf(" serial_result:%s<:)\n", serial_result.c_str());
+			if (serial_result.find(r_tmnl_1) != std::string::npos)
+			{
+				Sleep(200);
+				RDLOG->WriteLogf(" serial_cmd_2:%s\n", serial_cmd_1.c_str());
+				ret = MAINDUT->use_comport(port_nickname.c_str())->WRString(serial_cmd_2.c_str(), serial_result, r_tmnl_2.c_str(), wr_wait, r_timeout);
+				RDLOG->WriteLogf(" serial_result:%s<:)\n", serial_result.c_str());
+			}
+			if (serial_result.find(r_tmnl_2) != std::string::npos)
+			{
+				ret = MAINDUT->m_dos.Send(console_cmd.c_str(), console_result, 20000);
+				string string_key = "Max_SPL = ";
+				int pos = console_result.find(string_key);
+				if (pos != std::string::npos)
+				{
+					pos += string_key.length();
+					console_result.erase(console_result.end() - 2, console_result.end());
+					spl_result = console_result.substr(pos);
+				}
+			}
+			if (!is_port_open)
+				MAINDUT->use_comport(port_nickname.c_str())->Close();
+		}
+
+		RDLOG->WriteLogf(" SPL_Value = %s<:)\n", spl_result.c_str());
+
+		times++;
+		if (ret == S_OK)
+			test_result = MAINDUT->log_sfis_and_set_info(item_name.c_str(), spl_result.c_str(), times > retry);
+		else
+			MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL", times > retry);
+
+
+	} while (times <= retry && test_result == S_FALSE);
+
+	return ret;
+}
+bool CPjQSM::FileExists(string filename) // Hai add 240323
+{
+	ifstream file(filename);
+	if (file.is_open())
+	{
+		return 1;
+		file.close();
+	}
+	else
+	{
+		return 0;
+	}
+}
+int CPjQSM::cmd_ddr_test(const char* item, const Json::Value& param)
+{
+	int ret = S_FALSE;
+	string item_name;
+	bool is_port_open = false;
+	string port_nickname;
+	int retry = MAINDUT->ParamInt(param, "retry", 0);
+	int times = 0;
+	string serial_cmd_1;
+	string serial_cmd_2;
+	string serial_cmd_3;
+	string serial_cmd_4;
+	string r_tmnl_1_1;
+	string r_tmnl_1_2;
+	string r_tmnl_2;
+	string r_tmnl_2_2;
+	string r_tmnl_3;
+	string r_tmnl_4;
+	const char ctrl_c_cmd[3] = { 0x03, 0x0d, 0x00 };//ctrl+c
+
+
+
+	unsigned int wr_wait;
+	unsigned int r_timeout;
+	unsigned int r_timeout_mtest;
+	string serial_result = "";
+	string serial_reg_result = "";
+	string reg_result = "PASS";
+	int test_result = S_FALSE;
+
+	
+	DWORD	ta, tb, delta_time;
+
+
+	MAINDUT->ParamStr(param, "item_name", item_name, "");
+	MAINDUT->ParamStr(param, "port_nickname", port_nickname, "");
+	bool reg_enable = MAINDUT->ParamBool(param, "reg_enable", false);
+
+	wr_wait = MAINDUT->ParamInt(param, "wr_wait", 10);
+	r_timeout = MAINDUT->ParamInt(param, "r_timeout", 20000);
+	r_timeout_mtest = MAINDUT->ParamInt(param, "r_timeout_mtest", 250000);
+
+	MAINDUT->ParamStr(param, "w_cmd_1", serial_cmd_1, "");
+	serial_cmd_1 = serial_cmd_1 + "\r";
+	MAINDUT->ParamStr(param, "r_tmnl_1_1", r_tmnl_1_1, "");
+	MAINDUT->ParamStr(param, "r_tmnl_1_2", r_tmnl_1_2, "");
+
+	MAINDUT->ParamStr(param, "w_cmd_2", serial_cmd_2, "");
+	serial_cmd_2 = serial_cmd_2 + "\r";
+	MAINDUT->ParamStr(param, "r_tmnl_2", r_tmnl_2, "");
+	MAINDUT->ParamStr(param, "r_tmnl_2_2", r_tmnl_2_2, "");
+
+	MAINDUT->ParamStr(param, "w_cmd_3", serial_cmd_3, "");
+	serial_cmd_3 = serial_cmd_3 + "\r";
+	MAINDUT->ParamStr(param, "r_tmnl_3", r_tmnl_3, "");
+
+	MAINDUT->ParamStr(param, "w_cmd_4", serial_cmd_4, "");
+	serial_cmd_4 = serial_cmd_4 + "\r";
+	MAINDUT->ParamStr(param, "r_tmnl_4", r_tmnl_4, "");
+
+
+	do
+	{
+		if (MAINDUT->use_comport(port_nickname.c_str()) != NULL)
+		{
+			is_port_open = MAINDUT->use_comport(port_nickname.c_str())->IsOpen();
+			if (!is_port_open)
+				ret = MAINDUT->use_comport(port_nickname.c_str())->Open();
+			// Step 1: Send reboot
+			RDLOG->WriteLogf(" serial_cmd_1:%s\n", serial_cmd_1.c_str());
+			ret = MAINDUT->use_comport(port_nickname.c_str())->WRString(serial_cmd_1.c_str(), serial_result, r_tmnl_1_1.c_str(), wr_wait, r_timeout);
+			RDLOG->WriteLogf(" serial_result_1_1:%s<:)\n", serial_result.c_str());
+			// Step 1: Send enter
+			if (serial_result.find(r_tmnl_1_1) != std::string::npos)
+			{
+				Sleep(50);
+				ret = MAINDUT->use_comport(port_nickname.c_str())->WRString("\r", serial_result, r_tmnl_1_2.c_str(), wr_wait, 2000);
+				RDLOG->WriteLogf(" serial_result_1_2:%s<:)\n", serial_result.c_str());
+			}
+			// Step 2: Send mtest
+			ta = ::GetTickCount();
+			if (serial_result.find(r_tmnl_1_2) != std::string::npos)
+			{
+				Sleep(100);
+				RDLOG->WriteLogf(" serial_cmd_2:%s\n", serial_cmd_2.c_str());
+				ret = MAINDUT->use_comport(port_nickname.c_str())->WRString(serial_cmd_2.c_str(), serial_result, r_tmnl_2.c_str(), wr_wait, r_timeout_mtest);
+				RDLOG->WriteLogf(" serial_result_2:%s<:)\n", serial_result.c_str());
+			}
+			tb = ::GetTickCount();
+			delta_time = (tb - ta)/1000.0;
+			RDLOG->WriteLogf("Times run mtest command:%.4f<:)\n", delta_time);
+			// Step 2: Send ctrl c
+			bool flag_temp = false;
+			if (serial_result.find(r_tmnl_2) != std::string::npos)
+			{
+				flag_temp = true;
+				Sleep(10);
+				ret = MAINDUT->use_comport(port_nickname.c_str())->WRString(ctrl_c_cmd, serial_result, r_tmnl_2_2.c_str(), 10, 1000);
+				RDLOG->WriteLogf(" serial_result_2_2:%s<:)\n", serial_result.c_str());
+				serial_reg_result = serial_result;
+			}
+			// Step 3: Send boot
+			if (serial_result.find(r_tmnl_2_2) != std::string::npos && flag_temp == true)
+			{
+				Sleep(100);
+				RDLOG->WriteLogf(" serial_cmd_3:%s\n", serial_cmd_3.c_str());
+				ret = MAINDUT->use_comport(port_nickname.c_str())->WRString(serial_cmd_3.c_str(), serial_result, r_tmnl_3.c_str(), wr_wait, r_timeout);
+				RDLOG->WriteLogf(" serial_result_3:%s<:)\n", serial_result.c_str());
+			}
+			// Step 4: Send root
+			if (serial_result.find(r_tmnl_3) != std::string::npos)
+			{
+				Sleep(500);
+				RDLOG->WriteLogf(" serial_cmd_4:%s\n", serial_cmd_4.c_str());
+				ret = MAINDUT->use_comport(port_nickname.c_str())->WRString(serial_cmd_4.c_str(), serial_result, r_tmnl_4.c_str(), wr_wait, 5000);
+				RDLOG->WriteLogf(" serial_result_4:%s<:)\n", serial_result.c_str());
+			}
+			if (serial_result.find(r_tmnl_4) != std::string::npos)
+			{
+				test_result = S_OK;
+				if (reg_enable)
+				{
+					ret = MAINDUT->regular(serial_reg_result, param, reg_result);
+					RDLOG->WriteLogf(" reg_result:%s<:)\n", reg_result.c_str());
+				}
+			}
+			Sleep(100);
+			ret = MAINDUT->use_comport(port_nickname.c_str())->WriteString(ctrl_c_cmd);
+			Sleep(500);
+			if (!is_port_open)
+				MAINDUT->use_comport(port_nickname.c_str())->Close();
+		}
+		times++;
+		if (test_result == S_OK)
+			test_result = MAINDUT->log_sfis_and_set_info(item_name.c_str(), reg_result.c_str(), times > retry);
+		else
+			MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL", times > retry);
+	} while (times <= retry && test_result == S_FALSE);
+	return ret;
+}
+int CPjQSM::cmd_test_btn(const char* item, const Json::Value& param) // min add 240315
+{
+	int ret = S_FALSE;
+	bool is_port_open_dut = false;
+	bool is_port_open_jig = false;
+	string item_name;
+	string port_dut, port_jig;
+	string dut_cmd, jig_cmd_1, jig_cmd_2;
+	string dut_tmnl_1, dut_tmnl_2, jig_tmnl_1, jig_tmnl_2;
+	string serial_result = "";
+	int test_result = S_FALSE;
+	string reg_result = "PASS";
+
+	MAINDUT->ParamStr(param, "item_name", item_name, "");
+	MAINDUT->ParamStr(param, "dut_port_name", port_dut, "");
+	MAINDUT->ParamStr(param, "dut_tmnl_1", dut_tmnl_1, "");
+	MAINDUT->ParamStr(param, "dut_tmnl_2", dut_tmnl_2, "");
+	MAINDUT->ParamStr(param, "jig_port_name", port_jig, "");
+	MAINDUT->ParamStr(param, "jig_tmnl_1", jig_tmnl_1, "");
+	MAINDUT->ParamStr(param, "jig_tmnl_2", jig_tmnl_2, "");
+	bool reg_enable = MAINDUT->ParamBool(param, "reg_enable", true);
+	MAINDUT->ParamStr(param, "dut_cmd", dut_cmd, "");
+	MAINDUT->ParamStr(param, "jig_cmd_1", jig_cmd_1, "");
+	MAINDUT->ParamStr(param, "jig_cmd_2", jig_cmd_2, "");
+
+	unsigned int wr_wait = MAINDUT->ParamInt(param, "wr_wait", 10);
+
+	unsigned int jig_timeout = MAINDUT->ParamInt(param, "jig_timeout", 500);
+	unsigned int dut_timeout = MAINDUT->ParamInt(param, "dut_timeout", 500);
+
+	int retry = MAINDUT->ParamInt(param, "retry", 0);
+	int times = 0;
+	dut_cmd = dut_cmd + "\r";
+	jig_cmd_1 = jig_cmd_1 + "\r";
+	jig_cmd_2 = jig_cmd_2 + "\r";
+	const char ctrl_c_cmd[3] = { 0x03, 0x0d, 0x00 }; //{ 0x03, 0x0d, 0x00 }
+	DWORD	ta, tb;
+
+	do
+	{
+		if (MAINDUT->use_comport(port_dut.c_str()) != NULL && MAINDUT->use_comport(port_jig.c_str()) != NULL)
+		{
+			is_port_open_dut = MAINDUT->use_comport(port_dut.c_str())->IsOpen();
+			is_port_open_jig = MAINDUT->use_comport(port_jig.c_str())->IsOpen();
+			if (!is_port_open_dut)
+				ret = MAINDUT->use_comport(port_dut.c_str())->Open();
+			if (!is_port_open_jig)
+				ret = MAINDUT->use_comport(port_jig.c_str())->Open();
+			RDLOG->WriteLogf("DUT serial_cmd(%d):%s\n", ret, dut_cmd.c_str()); // press btn cmd
+			ret = MAINDUT->use_comport(port_dut.c_str())->WRString(dut_cmd.c_str(), serial_result, wr_wait);
+			RDLOG->WriteLogf("DUT serial_result(%d):%s\n", ret, serial_result.c_str());
+			size_t found = serial_result.find(dut_tmnl_1);
+			if (found != string::npos) // find dut_tmnl_1
+			{
+				//send cmd to jig
+				ret = MAINDUT->use_comport(port_jig.c_str())->WRString(jig_cmd_1.c_str(), serial_result, jig_tmnl_1.c_str(), wr_wait, jig_timeout);
+				Sleep(200);
+				ret += MAINDUT->use_comport(port_jig.c_str())->WRString(jig_cmd_2.c_str(), serial_result, jig_tmnl_2.c_str(), wr_wait, jig_timeout);
+				Sleep(100);
+				if (ret == S_OK)//read event of dut on serial
+				{
+					ret = MAINDUT->use_comport(port_dut.c_str())->ReadString(serial_result, dut_tmnl_2.c_str(), dut_timeout);
+					//ta = ::GetTickCount();
+					//while (true) //check event
+					//{
+					//	ret = MAINDUT->use_comport(port_dut.c_str())->ReadString(serial_result); // read event
+					//	tb = ::GetTickCount();
+					//	if ((tb - ta) > dut_timeout)
+					//		break;
+					//}
+					if (ret != S_OK)
+						MAINDUT->use_comport(port_dut.c_str())->WriteString(ctrl_c_cmd); // send ctrl + c to stop cmd
+				}
+				if (!is_port_open_dut) // close comport dut & jig
+					MAINDUT->use_comport(port_dut.c_str())->Close();
+				if (!is_port_open_jig)
+					MAINDUT->use_comport(port_jig.c_str())->Close();
+			}
+			else
+				ret = S_FALSE;
+		}
+		if (ret == S_OK)
+			if (reg_enable)
+				ret = MAINDUT->regular(serial_result, param, reg_result);
+		times++;
+		if (ret == S_OK)
+			test_result = MAINDUT->log_sfis_and_set_info(item_name.c_str(), reg_result.c_str(), times > retry);
+		else
+			MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL", times > retry);
+	} while (times <= retry && test_result == S_FALSE);
+
+	return ret;
+}
+
+
+/// <summary>
+/// The test functions with PPS
+/// </summary>
+int CPjQSM::test_SET_VOLT_CURR_OUTPUT(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	string Itemname = PARAM_S("item_name");
+	string GPIBname = PARAM_S("GPIB_Name");
+	double Voltage = param["Voltage"].asDouble();
+	double Current = param["Current"].asDouble();	
+	const char* GPIBnamestr = GPIBname.c_str();
+	if (MAINDUT->use_gpibdev(GPIBnamestr) != NULL)
+	{
+		/*RDLOG->WriteLogf("PPS set Voltage: %f", Voltage);
+		ret = MAINDUT->use_gpibdev(GPIBnamestr)->PPS_SET_VOLTAGE_CH2(Voltage);
+		RDLOG->WriteLogf("PPS set Current: %f", Current);
+		ret += MAINDUT->use_gpibdev(GPIBnamestr)->PPS_SET_CURRENT_CH2(Current);
+		RDLOG->WriteLogf("PPS On");
+		ret += MAINDUT->use_gpibdev(GPIBnamestr)->PPS_SET_POWER_ON_CH2();*/
+		RDLOG->WriteLogf("PPS set Voltage: %f", Voltage);
+		ret = MAINDUT->use_gpibdev(GPIBnamestr)->PPS_SET_VOLTAGE(Voltage);
+		RDLOG->WriteLogf("PPS set Current: %f", Current);
+		ret += MAINDUT->use_gpibdev(GPIBnamestr)->PPS_SET_CURRENT(Current);
+		RDLOG->WriteLogf("PPS On");
+		ret += MAINDUT->use_gpibdev(GPIBnamestr)->PPS_SET_POWER_ON();
+	}
+	if (ret == RET_SUCCESS)
+	{
+		MAINDUT->log_sfis_and_set_info_no_judge(Itemname.c_str(), CSfisCsv::Pass, "PASS");
+	}
+	else
+		MAINDUT->log_sfis_and_set_info_no_judge(Itemname.c_str(), CSfisCsv::Fail, "FAIL");
+	return ret;
+}
+/// Agilent663x has not the get_voltage function
+int CPjQSM::test_MEAS_PPS_VOLT(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	string Itemname = PARAM_S("item_name");
+	string GPIBname = PARAM_S("GPIB_Name");
+	double Meas_Volt = 0;
+	double pdVolt = 0;
+
+	const char* GPIBnamestr = GPIBname.c_str();
+
+	if (MAINDUT->use_gpibdev(GPIBnamestr) != NULL)
+	{
+		/*RDLOG->WriteLogf("PPS Meas Voltent");
+		ret += MAINDUT->use_gpibdev(GPIBnamestr)->PPS_GET_VOLTAGE_CH2(&pdVolt);*/
+		RDLOG->WriteLogf("PPS Meas Voltent");
+		ret = MAINDUT->use_gpibdev(GPIBnamestr)->PPS_GET_VOLTAGE(&pdVolt);
+		Meas_Volt = pdVolt;
+	}
+	MAINDUT->log_sfis_and_set_info(Itemname.c_str(), Meas_Volt);
+
+	return ret;
+}
+int CPjQSM::test_MEAS_PPS_CURR(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	string Itemname = PARAM_S("item_name");
+	string GPIBname = PARAM_S("GPIB_Name");
+	double Meas_Curr = 0;
+	double pdCurr = 0;
+
+	const char* GPIBnamestr = GPIBname.c_str();
+
+	if (MAINDUT->use_gpibdev(GPIBnamestr) != NULL)
+	{
+		/*RDLOG->WriteLogf("PPS Meas Current");
+		ret = MAINDUT->use_gpibdev(GPIBnamestr)->PPS_GET_CURRENT_CH2(&pdCurr);*/
+		RDLOG->WriteLogf("PPS Meas Current");
+		ret = MAINDUT->use_gpibdev(GPIBnamestr)->PPS_GET_CURRENT(&pdCurr);
+		Meas_Curr = pdCurr;
+	}
+	MAINDUT->log_sfis_and_set_info(Itemname.c_str(), Meas_Curr);
+	return ret;
+}
+int CPjQSM::test_PPS_OFF(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	string Itemname = PARAM_S("item_name");
+	string GPIBname = PARAM_S("GPIB_Name");
+
+	const char* GPIBnamestr = GPIBname.c_str();
+
+	if (MAINDUT->use_gpibdev(GPIBnamestr) != NULL)
+	{
+		/*RDLOG->WriteLogf("PPS Off");
+		ret = MAINDUT->use_gpibdev(GPIBnamestr)->PPS_SET_POWER_OFF_CH2();*/
+		RDLOG->WriteLogf("PPS Off");
+		ret = MAINDUT->use_gpibdev(GPIBnamestr)->PPS_SET_POWER_OFF();
+	}
+
+	if (ret == RET_SUCCESS)
+		MAINDUT->log_sfis_and_set_info_no_judge(Itemname.c_str(), CSfisCsv::Pass, "PASS");
+	else
+		MAINDUT->log_sfis_and_set_info_no_judge(Itemname.c_str(), CSfisCsv::Fail, "FAIL");
+
+	return ret;
+}
+/// <summary>
+/// The test functions with DMM
+/// </summary>
+int CPjQSM::test_GET_VOLT(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	int count_sample = 0;
+	double pdDCVolt = 0;
+	string item_name = PARAM_S("item_name");
+	string GPIBname = PARAM_S("GPIB_Name");
+	int channel = PARAM_N("Channel");
+	int count = PARAM_N("Count");
+	const char* GPIBnamestr = GPIBname.c_str();
+	if (MAINDUT->use_gpibdev(GPIBnamestr) != NULL)
+	{
+		std::vector<double> sample_DC_volt;
+		while (count_sample < count)
+		{
+			MAINDUT->use_gpibdev(GPIBnamestr)->SET_DMM_MEAS_PARA(DMM_TYPE_DC_VOLT,
+				"AUTO", "6", "1", "NONE", "NONE", "OFF", 0.001, 1);
+			//Range, Resolution, IntegrationTime, CH Delay, Avg Count)
+			MAINDUT->use_gpibdev(GPIBnamestr)->READ_DC_VOLTAGE(channel, &pdDCVolt);
+			count_sample++;
+			RDLOG->WriteLogf(" Voltage Value[%d]: %f\n", count_sample, pdDCVolt);
+			sample_DC_volt.push_back(pdDCVolt);
+		}
+		pdDCVolt = 0;
+		for each (double var in sample_DC_volt)
+		{
+			pdDCVolt += var;
+		}
+		pdDCVolt /= (double)sample_DC_volt.size();
+		volt = pdDCVolt;
+		RDLOG->WriteLogf(" Voltage Average Value: %f\n", pdDCVolt);
+		MAINDUT->log_sfis_and_set_info(item_name.c_str(), pdDCVolt);
+		return RET_SUCCESS;
+	}
+	MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL");
+	return ret;
+}
+int CPjQSM::test_GET_CURR(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	int count_sample = 0;
+	double DC_current = 0;
+	string item_name = PARAM_S("item_name");
+	string GPIBname = PARAM_S("GPIB_Name");
+	int channel = PARAM_N("Channel");
+	int count = PARAM_N("Count");
+	const char* GPIBnamestr = GPIBname.c_str();
+	if (MAINDUT->use_gpibdev(GPIBnamestr) != NULL)
+	{
+		std::vector<double> sample_DC_curr;
+		while (count_sample < count)
+		{
+			MAINDUT->use_gpibdev(GPIBnamestr)->SET_DMM_MEAS_PARA(DMM_TYPE_DC_CURR,
+				"AUTO", "6", "1", "NONE", "NONE", "OFF", 0.001, 1);
+			//Range, Resolution, IntegrationTime, CH Delay, Avg Count)
+			MAINDUT->use_gpibdev(GPIBnamestr)->READ_DC_CURRENT(channel, &DC_current);
+			count_sample++;
+			RDLOG->WriteLogf(" Current Value[%d]: %f\n", count_sample, DC_current);
+			sample_DC_curr.push_back(DC_current);
+		}
+		DC_current = 0;
+		for each (double var in sample_DC_curr)
+		{
+			DC_current += var;
+		}
+		DC_current /= (double)sample_DC_curr.size();
+		resistance = volt / DC_current;
+		RDLOG->WriteLogf(" Current Average Value: %f\n", DC_current);
+		MAINDUT->log_sfis_and_set_info(item_name.c_str(), DC_current);
+		MAINDUT->log_sfis_and_set_info_no_judge("CAL_RESISTOR_VALUE", CSfisCsv::Pass, resistance);
+		return RET_SUCCESS;
+	}
+	MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL");
+	return ret;
+}
+int CPjQSM::test_GET_OHM(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	int count_sample = 0;
+	double pdOHM = 0;
+	string item_name = PARAM_S("item_name");
+	string GPIBname = PARAM_S("GPIB_Name");
+	int channel = PARAM_N("Channel");
+	int count = PARAM_N("Count");
+	const char* GPIBnamestr = GPIBname.c_str();
+	if (MAINDUT->use_gpibdev(GPIBnamestr) != NULL)
+	{
+		std::vector<double> sample_OHM;
+		while (count_sample < count)
+		{
+			MAINDUT->use_gpibdev(GPIBnamestr)->SET_DMM_MEAS_PARA(DMM_TYPE_OHM,
+				"AUTO", "6", "1", "NONE", "NONE", "OFF", 0.001, 1);
+			MAINDUT->use_gpibdev(GPIBnamestr)->READ_RESISTANCE(channel, &pdOHM);
+			count_sample++;
+			RDLOG->WriteLogf(" Resistance Value[%d]: %f\n", count_sample, pdOHM);
+			sample_OHM.push_back(pdOHM);
+		}
+		pdOHM = 0;
+		for each (double var in sample_OHM)
+		{
+			pdOHM += var;
+		}
+		pdOHM /= (double)sample_OHM.size();
+		RDLOG->WriteLogf(" Resistance Average Value: %f\n", pdOHM);
+		MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Pass, pdOHM);
+		return RET_SUCCESS;
+	}
+	MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL");
+	return ret;
+}
+int CPjQSM::test_GET_OHM_4W(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	int count_sample = 0;
+	double pdOHM = 0;
+
+	string item_name = PARAM_S("item_name");
+	string GPIBname = PARAM_S("GPIB_Name");
+	int channel = PARAM_N("Channel");
+	int count = PARAM_N("Count");
+	const char* GPIBnamestr = GPIBname.c_str();
+	if (MAINDUT->use_gpibdev(GPIBnamestr) != NULL)
+	{
+		std::vector<double> sample_OHM;
+		while (count_sample < count)
+		{
+			MAINDUT->use_gpibdev(GPIBnamestr)->SET_DMM_MEAS_PARA(DMM_TYPE_OHM_4W,
+				"AUTO", "6", "1", "NONE", "NONE", "OFF", 0.001, 1);
+			MAINDUT->use_gpibdev(GPIBnamestr)->READ_RESISTANCE_4W(channel, &pdOHM);
+			count_sample++;
+			RDLOG->WriteLogf(" Resistance Value[%d]: %f\n", count_sample, pdOHM);
+			sample_OHM.push_back(pdOHM);
+		}
+		pdOHM = 0;
+		for each (double var in sample_OHM)
+		{
+			pdOHM += var;
+		}
+		pdOHM /= (double)sample_OHM.size();
+		RDLOG->WriteLogf(" Resistance Average Value: %f\n", pdOHM);
+		MAINDUT->log_sfis_and_set_info(item_name.c_str(), pdOHM);
+		return RET_SUCCESS;
+	}
+	MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL");
+	return ret;
+}
+/// <summary>
+/// The Min, Max, Average and Stdevp function
+/// </summary>
+int CPjQSM::test_PIR_MIN_VALUE(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	string item_name = param["item_name"].asString();	
+	for (size_t i = 0; i < SIZE_ARRAY; i++)
+	{
+		if (minValue > data[i])
+		{
+			minValue = data[i];
+		}
+	}
+	char valueChar[32] = { 0 };
+	sprintf_s(valueChar, "%.1f", minValue);
+	if (strlen(valueChar) != 0)
+	{
+		MAINDUT->log_sfis_and_set_info(item_name.c_str(), valueChar);
+		ret = RET_SUCCESS;
+	}
+	else
+	{
+		MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL");
+	}
+	RDLOG->WriteLogf(" Min Value: %s\n", valueChar);
+	return ret;
+}
+int CPjQSM::test_PIR_MAX_VALUE(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	string item_name = param["item_name"].asString();
+
+	for (size_t i = 0; i < SIZE_ARRAY; i++)
+	{
+		if (maxValue < data[i])
+		{
+			maxValue = data[i];
+		}
+	}
+	char valueChar[32] = { 0 };
+	sprintf_s(valueChar, "%.1f", maxValue);
+	if (strlen(valueChar) != 0)
+	{
+		MAINDUT->log_sfis_and_set_info(item_name.c_str(), valueChar);
+		ret = RET_SUCCESS;
+	}
+	else
+	{
+		MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL");
+	}
+	RDLOG->WriteLogf(" Max Value: %s\n", valueChar);
+	return ret;
+}
+int CPjQSM::test_PIR_AVERAGE_VALUE(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	string item_name = param["item_name"].asString();
+
+	for (size_t i = 0; i < SIZE_ARRAY; i++)
+	{
+		averageValue += data[i];
+	}
+	averageValue = averageValue / (double)SIZE_ARRAY;
+	/*char valueChar[32] = { 0 };
+	sprintf_s(valueChar, "%.1f", averageValue);*/
+	if (averageValue != 0)
+	{
+		MAINDUT->log_sfis_and_set_info(item_name.c_str(), averageValue);
+		ret = RET_SUCCESS;
+	}
+	else
+	{
+		MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Fail, "FAIL");
+	}
+	RDLOG->WriteLogf(" Average Value: %s\n", averageValue);
+	return ret;
+}
+int CPjQSM::test_PIR_STDEVP_VALUE(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	string item_name = param["item_name"].asString();
+
+	for (size_t i = 0; i < SIZE_ARRAY; i++)
+	{
+		stdevpValue += pow((data[i] - averageValue),2);
+	}
+	stdevpValue = stdevpValue / ((double)SIZE_ARRAY-1);
+	stdevpValue = sqrt(stdevpValue);
+	/*char valueChar[32] = { 0 };
+	sprintf_s(valueChar, "%.1f", stdevpValue);*/
+	MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Pass, stdevpValue);
+	RDLOG->WriteLogf("STDEV Value : %s\n", stdevpValue);
+	return 0;
+}
+void CPjQSM::ReadData(double* data)
+{
+	for (size_t i = 0; i < SIZE_ARRAY; i++)
+	{
+		data[i] = (rand() % 51) + 50;
+	}
+}
+/// <summary>
+/// The function tests the Regular Expression
+/// </summary>
+int CPjQSM::test_read_data_from_regex(const char* item, const Json::Value& param)
+{
+	int ret = RET_FAIL;
+	string value = "PASS";
+	string adb_result;
+
+	string item_name = PARAM_S("item_name");
+	Json::Value cmd_list = param["dut_cmd"];
+	bool reg_enable = PARAM_B("reg_enable");
+	int reg_catch = PARAM_N("reg_catch");
+	string cmd_assgin = PARAM_S("cmd_assign");
+	Json::Value reg_rule_list = param["reg_rule"];
+
+	
+	vector<string> cmd_assign_list, value_result;
+	StringToken(cmd_assgin.c_str(), cmd_assign_list, ",", NONE);
+
+	for (unsigned int i = 0; i < cmd_list.size(); i++)
+	{
+		for (unsigned int j = 0; j < cmd_assign_list.size(); j++)
+		{
+			static int hai = 0;
+			if (i == stoi(cmd_assign_list[j]))
+			{
+				string Hai = MAINDUT->hai_cmd_by_regex(cmd_list[i].asString(), reg_enable, reg_rule_list[i].asString().c_str(), reg_catch);
+				value_result.push_back(Hai);
+			}
+			else
+			{
+				MAINDUT->adb_command((cmd_list[i].asString()).c_str(), adb_result, 1000);
+				RDLOG->WriteLogf(" result: %s", adb_result);
+			}
+		}
+	}
+	value = value_result[value_result.size() - 1];
+	for (unsigned int n = 0; n < value_result.size(); n++)
+	{
+		if (value_result[n] == "FAIL")
+		{
+			value = "FAIL";
+			break;
+		}
+	}
+	ret = RET_SUCCESS;
+	MAINDUT->log_sfis_and_set_info_no_judge(item_name.c_str(), CSfisCsv::Pass, value.c_str());
+	return ret;
+}
